@@ -1,6 +1,12 @@
-Secret store is a set of computers (aka key servers), which are running Parity in special mode. Secret store can be used to distributively generate a secret, without revealing this secret to any individual key server. Implementation is based on [this paper](http://citeseerx.ist.psu.edu/viewdoc/download;jsessionid=A0EF4DEE6638E535648F19C13A0251C2?doi=10.1.1.124.4128&rep=rep1&type=pdf).
+Secret store is a set of computers (aka key servers), which are running Parity in special mode. Secret store can be used to distributively generate a server-side key pair, without revealing secret portion of this key pair to any individual key server. Implementation is based on [this paper](http://citeseerx.ist.psu.edu/viewdoc/download;jsessionid=A0EF4DEE6638E535648F19C13A0251C2?doi=10.1.1.124.4128&rep=rep1&type=pdf). 
 
-The same secret can be used later to encrypt some confidential data (document). When original content of the document is required, you can ask any key server to restore the secret and use it for decryption. This call will only succeed, if requester (the one who owns the key, used to generate “restore the secret” request) has an access to the document. List of users, able to access the secret is stored in the permissioning contract on the blockchain.
+The same secret can be used later to encrypt some confidential data. To encrypt some confidential document, you could:
+- in addition to server-side key, use command-line tools to generate document key (see below);
+- ask Secret store to distributively store this key. Document key is also not revealed to any individual key server and is stored in encrypted form;
+- encrypt document with document key and store it.
+When original content of the document is required, you can ask any key server to restore the secret and use it for decryption. This call will only succeed, if requester (the one who owns the key, used to generate “restore the secret” request) has an access to the document. List of users, able to access the secret is stored in the permissioning contract on the blockchain.
+
+Server-side key pair also can be used to generate EC-Schnorr signature for given message (message hash). Implementation is based on [this paper](https://www.researchgate.net/profile/A_Chronopoulos/publication/224386852_Efficient_multi-party_digital_signature_using_adaptive_secret_sharing_for_low-power_devices_in_wireless_networksPLEASE_REFERENCE_IN_YOUR_PAPERS/links/00b7d52c2a3fb5bf8e000000/Efficient-multi-party-digital-signature-using-adaptive-secret-sharing-for-low-power-devices-in-wireless-networksPLEASE-REFERENCE-IN-YOUR-PAPERS.pdf) with [additional notes](http://www.wu.ece.ufl.edu/mypapers/notesMulti-partyDigitalSignature.pdf).
 
 ## Permissioning contract
 The permissioning contract has to implement a single method:
@@ -67,11 +73,38 @@ target/release/parity` has been built on step 1. Copy this file to the folder wi
 ```
 RUST_LOG=secretstore=trace,secretstore_net=trace ./parity --config config.toml
 ```
-### 4: Generate a secret
+
+### 4: Generate server-side key pair
+```
+curl -v -X POST http://localhost:8082/shadow/0000000000000000000000000000000000000000000000000000000000000000/de12681e0b8f7a428f12a6694a5f7e1324deef3d627744d95d51b862afc13799251831b3611ae436c452b54cdf5c4e78b361a396ae183e8b4c34519e895e623c00/1
+```
+
+Where:
+- `0000000000000000000000000000000000000000000000000000000000000000` is 32-bytes identifier of server-side key pair. The same identifier should be used later to recover the key. If you're going to encrypt document with generated key, it would be good to use document contents hash as this identifier.
+- `de12681e0b8f7a428f12a6694a5f7e1324deef3d627744d95d51b862afc13799251831b3611ae436c452b54cdf5c4e78b361a396ae183e8b4c34519e895e623c00` is the same identifier, signed with requester private key
+- `1` is key generation threshold (configuration parameter T, described in configuration section above)
+
+Return value is a hex-encoded public portion of server-side key pair.
+
+### 5: Store externally-generated document key
+```
+curl -v -X POST http://localhost:8082/shadow/0000000000000000000000000000000000000000000000000000000000000000/de12681e0b8f7a428f12a6694a5f7e1324deef3d627744d95d51b862afc13799251831b3611ae436c452b54cdf5c4e78b361a396ae183e8b4c34519e895e623c00/368244efaf441c2dabf7a723355a97b3b86f27bdb2827ae6f34ddece5132efd37af4ba808957b7113b4296bc4ae9ec7be38f9de6bae00504e775883a50d4658a/b7ad0603946987f1a154ae7f074e45da224eaa83704aac16a2d43a675d219654cf087b5d7aacce0790a65abbc1a495b26e71a5c6e9a4a71b543bf0048935bc13
+```
+
+Where:
+- `0000000000000000000000000000000000000000000000000000000000000000` is server-side key pair identifier
+- `de12681e0b8f7a428f12a6694a5f7e1324deef3d627744d95d51b862afc13799251831b3611ae436c452b54cdf5c4e78b361a396ae183e8b4c34519e895e623c00` is the same identifier, signed with requester private key
+`368244efaf441c2dabf7a723355a97b3b86f27bdb2827ae6f34ddece5132efd37af4ba808957b7113b4296bc4ae9ec7be38f9de6bae00504e775883a50d4658a` is 'common point' part of encrypted document key
+`b7ad0603946987f1a154ae7f074e45da224eaa83704aac16a2d43a675d219654cf087b5d7aacce0790a65abbc1a495b26e71a5c6e9a4a71b543bf0048935bc13` is 'encrypted point' part of encrypted document key
+
+RPCs, which can be used to generate 'common point' and 'encrypted point' will be added later.
+
+### 6: Simultaneously generate server-side and document key
 ```
 curl -X POST http://localhost:8082/0000000000000000000000000000000000000000000000000000000000000001/a199fb39e11eefb61c78a4074a53c0d4424600a3e74aad4fb9d93a26c30d067e1d4d29936de0c73f19827394a1dd049480a0d581aee7ae7546968da7d3d1c2fd01/0
 ```
-Where:  
+
+Where:
 - `0000000000000000000000000000000000000000000000000000000000000001` is 32-bytes identifier of key generation session. The same identifier should be used later to recover the key. If you're going to encrypt document with generated key, it would be good to use document contents hash as this identifier.
 -
  `a199fb39e11eefb61c78a4074a53c0d4424600a3e74aad4fb9d93a26c30d067e1d4d29936de0c73f19827394a1dd049480a0d581aee7ae7546968da7d3d1c2fd01` is key generation session identifier, signed with requester private key
@@ -79,7 +112,7 @@ Where:
 
 Return value is a hex-encoded point on secp256k1 (key), encrypted with requester public key. You could manually generate key from this point (usually by taking X coordinate of the point) and encrypt data, or use one of RPCs described below.
 
-### 5: Retrieve a secret
+### 7: Retrieve a secret
 ```
 curl http://localhost:8082/0000000000000000000000000000000000000000000000000000000000000001/a199fb39e11eefb61c78a4074a53c0d4424600a3e74aad4fb9d93a26c30d067e1d4d29936de0c73f19827394a1dd049480a0d581aee7ae7546968da7d3d1c2fd01
 ```
@@ -91,7 +124,7 @@ Return value is a hex-encoded point on secp256k1 (key), encrypted with requester
 
 Please notice, that the during this call, secret is revealed to the key server, you are requesting. To make sure that secret is not revealed to any key server, you could use method, described in section "Retrieve a secret shadow".
 
-### 6: Retrieve a secret shadow
+### 8: Retrieve a secret shadow
 
 ```
 curl http://localhost:8082/shadow/0000000000000000000000000000000000000000000000000000000000000001/a199fb39e11eefb61c78a4074a53c0d4424600a3e74aad4fb9d93a26c30d067e1d4d29936de0c73f19827394a1dd049480a0d581aee7ae7546968da7d3d1c2fd01
@@ -103,6 +136,18 @@ curl http://localhost:8082/shadow/0000000000000000000000000000000000000000000000
 This method is suitable for cases, when you do not trust the key server, you're asking for the key. Secret is not revealed to this key server. It only responds with the data, required to restore secret if you have private key of requester.
 
 Return value is a JSON object with `decrypted_secret`, `common_point` and `decrypt_shadows` fields. To decrypt this data and restore the secret, you must use `secretstore_shadowDecrypt` RPC, described below. Pass values of the fields, described above to this RPC and it will return the secret.
+
+### 9: Sign message using server-side key pair
+```
+curl -v http://localhost:8082/0000000000000000000000000000000000000000000000000000000000000000/de12681e0b8f7a428f12a6694a5f7e1324deef3d627744d95d51b862afc13799251831b3611ae436c452b54cdf5c4e78b361a396ae183e8b4c34519e895e623c00/0000000000000000000000000000000000000000000000000000000000000001
+```
+
+Where:
+- `0000000000000000000000000000000000000000000000000000000000000000` is server-side key pair identifier
+- `de12681e0b8f7a428f12a6694a5f7e1324deef3d627744d95d51b862afc13799251831b3611ae436c452b54cdf5c4e78b361a396ae183e8b4c34519e895e623c00` is the same identifier, signed with requester private key
+`0000000000000000000000000000000000000000000000000000000000000001` is hash of the message, which should be signed with server-side key
+
+Return value is hex-encoded signature of the message, encrypted with caller public key. Please note, that this call will only succeed if requester have access to the server-side secret key (it is checked by calling permissioning contract' check method).
 
 ## RPCs for handling the secrets
 
